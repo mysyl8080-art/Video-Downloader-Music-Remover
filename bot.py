@@ -39,7 +39,7 @@ ALLOWED_USER_IDS = {
 }
 JOB_SEMAPHORE = asyncio.Semaphore(WORKERS)
 
-URL_RE = re.compile(r"https?://\\S+", re.IGNORECASE)
+URL_RE = re.compile(r"https?://\S+", re.IGNORECASE)
 
 
 class UserFacingError(Exception):
@@ -209,8 +209,8 @@ def remove_background_music(source: Path, workdir: Path) -> tuple[Path, bool]:
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
-        "أهلًا! أرسل رابطًا عامًا لفيديو أو صوت مسموح لك بتنزيله. سأحاول إزالة الموسيقى الخلفية وإبقاء الكلام.\\n\\n"
-        "ملاحظة: الفصل بالذكاء الاصطناعي قد يترك بعض الموسيقى أو يؤثر قليلًا على الكلام، ولا يتجاوز DRM أو تسجيل الدخول.\\n"
+        "أهلًا! أرسل رابطًا عامًا لفيديو أو صوت مسموح لك بتنزيله. سأحاول إزالة الموسيقى الخلفية وإبقاء الكلام.\n\n"
+        "ملاحظة: الفصل بالذكاء الاصطناعي قد يترك بعض الموسيقى أو يؤثر قليلًا على الكلام، ولا يتجاوز DRM أو تسجيل الدخول.\n"
         "استخدم /help للمساعدة."
     )
 
@@ -218,7 +218,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.effective_message.reply_text(
         f"أرسل رابطًا واحدًا في كل مرة. الحد الحالي: {MAX_DOWNLOAD_MB} ميجابايت تنزيل، "
-        f"{MAX_DURATION_MINUTES} دقيقة، و{MAX_OUTPUT_MB} ميجابايت للملف الناتج.\\n\\n"
+        f"{MAX_DURATION_MINUTES} دقيقة، و{MAX_OUTPUT_MB} ميجابايت للملف الناتج.\n\n"
         "يقبل البوت الروابط التي تدعمها yt-dlp عندما تكون متاحة علنًا ومسموحًا بتنزيلها. لا يدعم قوائم التشغيل أو تجاوز DRM/تسجيل الدخول."
     )
 
@@ -257,7 +257,7 @@ async def process_request(chat_id: int, user_id: int, url: str, bot) -> None:
                     f"الملف الناتج حجمه أكبر من حد Telegram المضبوط ({MAX_OUTPUT_MB} ميجابايت). "
                     "ارفع MAX_OUTPUT_MB فقط إذا كان خادم Bot API الذي تستخدمه يدعم ذلك."
                 )
-            caption = "تمت المعالجة: الكلام/الصوت الأمامي مع تقليل الموسيقى الخلفية.\\n" + title[:700]
+            caption = "تمت المعالجة: الكلام/الصوت الأمامي مع تقليل الموسيقى الخلفية.\n" + title[:700]
             with output.open("rb") as file_obj:
                 await bot.send_document(
                     chat_id=chat_id,
