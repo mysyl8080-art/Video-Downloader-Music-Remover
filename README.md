@@ -1,65 +1,84 @@
-# Video Downloader & Music Remover Bot
+# بوت تيليجرام لتنظيف الصوت من الموسيقى الخلفية
 
-Telegram bot for downloading publicly accessible videos with **yt-dlp** and removing background music from uploaded videos using **Demucs** while retaining the vocal stem.
+مشروع Python يستقبل رابط فيديو أو صوت، ينزّله باستخدام `yt-dlp`، ثم يستخدم Demucs لفصل مسار الكلام/الصوت الأمامي عن المصاحبة. في الفيديو، يُعاد تركيب الصوت الناتج مع مسار الفيديو الأصلي دون إعادة ترميز الصورة غالبًا. في الصوت، ينتج ملف MP3 بجودة 320 kbps.
 
-## Features
+## ملاحظات مهمة قبل الاستخدام
 
-- Download supported public video URLs through yt-dlp.
-- Upload a video to Telegram and run `/remove` to isolate vocals.
-- FFmpeg handles audio extraction and remuxing.
-- Docker-based deployment, including Railway configuration.
-- Secrets are supplied through environment variables.
+- لا توجد أداة تستطيع ضمان إزالة الموسيقى بنسبة 100% من كل تسجيل. الفصل الآلي قد يترك آثارًا موسيقية أو يؤثر قليلًا على الكلام، خصوصًا مع الموسيقى العالية أو تداخل الأصوات.
+- يدعم `yt-dlp` عددًا كبيرًا من المواقع، لكن ليس كل موقع أو كل رابط. المحتوى الخاص، وتسجيل الدخول، وDRM، والروابط التي تمنع التنزيل لا تُتجاوز.
+- استخدم البوت فقط مع محتوى تملك حق تنزيله ومعالجته أو لديك إذن بذلك، وبما يتوافق مع شروط المنصة والقانون المحلي.
+- الإعداد الافتراضي يسمح بملف حتى 1000 MB و90 دقيقة، لكن إرسال الناتج عبر Telegram Bot API القياسي محدود عمليًا بحجم قريب من 50 MB؛ لذلك حد الإرسال مضبوط على 48 MB. يمكن أن تحتاج تشغيل Bot API محليًا إذا أردت ملفات أكبر.
+- أول تشغيل قد يستغرق وقتًا لتنزيل أوزان نموذج Demucs. المعالجة على CPU بطيئة؛ GPU متوافق مع PyTorch يسرّعها كثيرًا. النموذج الافتراضي `htdemucs` مع `DEMUCS_SHIFTS=2` يوازن بين الجودة والسرعة.
 
-## Commands
+## أسرع طريقة تشغيل باستخدام Docker
 
-- `/start` — show instructions.
-- `/download <url>` — download a video.
-- Send a video, then use `/remove` — create a version with the isolated vocal stem.
-
-You can also send a supported URL as a normal text message.
-
-## Local setup
-
-Requirements: Python 3.11+, FFmpeg, and a Telegram bot token from BotFather.
+1. أنشئ بوتًا عبر `@BotFather` وخذ رمز البوت.
+2. انسخ `.env.example` إلى `.env` وضع الرمز في `TELEGRAM_BOT_TOKEN`.
+3. ثبّت Docker وDocker Compose ثم شغّل:
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
 cp .env.example .env
+# افتح .env وأضف رمز Telegram
+
+docker compose up -d --build
 ```
 
-Set `BOT_TOKEN` in your environment (or configure your deployment variables), then run:
+لمتابعة السجل:
 
 ```bash
+docker compose logs -f bot
+```
+
+لإيقاف البوت:
+
+```bash
+docker compose down
+```
+
+## تشغيل مباشر على Ubuntu/Debian
+
+يتطلب Python 3.11، وFFmpeg، ومساحة قرص كافية. قد يكون تثبيت PyTorch/Demucs كبيرًا.
+
+```bash
+sudo apt-get update && sudo apt-get install -y ffmpeg python3-venv
+python3 -m venv .venv
+. .venv/bin/activate
+pip install --upgrade pip
+pip install -r requirements.txt
+cp .env.example .env
+# حرّر .env وضع رمز البوت
 python bot.py
 ```
 
-## Docker
+## الإعدادات (`.env`)
 
-```bash
-docker build -t video-downloader-music-remover .
-docker run --rm -e BOT_TOKEN="YOUR_TOKEN" video-downloader-music-remover
-```
+| المتغير | الافتراضي | الوصف |
+|---|---:|---|
+| `TELEGRAM_BOT_TOKEN` | — | رمز البوت من BotFather؛ لا تشاركه أو ترفعه إلى GitHub. |
+| `MAX_DOWNLOAD_MB` | `1000` | أقصى حجم مصدر يُنزّل. |
+| `MAX_DURATION_MINUTES` | `90` | أقصى مدة للصوت أو الفيديو. |
+| `MAX_OUTPUT_MB` | `48` | حد إرسال الناتج عبر Bot API. |
+| `DEMUCS_MODEL` | `htdemucs` | نموذج فصل Demucs. |
+| `DEMUCS_SHIFTS` | `2` | زيادات الفصل لتحسين الجودة على حساب الوقت. |
+| `WORKERS` | `1` | عدد الوظائف المتزامنة؛ اتركه 1 للأجهزة محدودة الموارد. |
+| `ALLOWED_USER_IDS` | فارغ | اختياري: قائمة Telegram user ID مفصولة بفواصل لقصر الاستخدام على أشخاص محددين. |
+| `LOG_LEVEL` | `INFO` | مستوى سجل التشغيل. |
 
-## Railway deployment
+## طريقة الاستخدام
 
-1. Create a Railway project and deploy this GitHub repository.
-2. Railway detects the Dockerfile automatically.
-3. Add `BOT_TOKEN` in the service Variables tab.
-4. Deploy and inspect the service logs.
+1. افتح محادثة البوت واضغط Start.
+2. أرسل رابطًا مباشرًا عامًا لفيديو أو صوت واحد (ليس قائمة تشغيل).
+3. انتظر حتى يرسل البوت الملف الناتج. عند أول مرة قد يحتاج تنزيل النموذج.
 
-Other optional variables are documented in `.env.example`.
+## استكشاف الأخطاء
 
-## Important notes
+- **`TELEGRAM_BOT_TOKEN is missing`**: تأكد أن ملف `.env` موجود بجوار `docker-compose.yml` وأن الرمز صحيح.
+- **فشل تنزيل الرابط**: حدّث الصورة بإعادة البناء (`docker compose up -d --build`). تأكد أن الرابط عام وأن المنصة تسمح بالتنزيل؛ لا ترسل روابط خاصة أو تحتاج تسجيل دخول.
+- **خطأ فصل الصوت/نفاد الذاكرة**: قلّل `MAX_DURATION_MINUTES`، واترك `WORKERS=1`، أو استخدم جهازًا أقوى/GPU. جرّب `DEMUCS_SHIFTS=1` لتسريع العمل، مع احتمال انخفاض جودة الفصل قليلًا.
+- **الناتج أكبر من حد الإرسال**: استخدم مقطعًا أقصر أو إعدادات خادم Bot API مناسبة. رفع الحد وحده لا يجعل Telegram يقبل الملف.
+- **مساحة القرص**: يحتاج التنزيل، والملف الصوتي الوسيط، وملفات stems مساحة إضافية. ملفات العمل تُحذف تلقائيًا بعد انتهاء كل مهمة.
+- **تحديث yt-dlp**: أعد بناء الحاوية للحصول على أحدث إصدار: `docker compose build --no-cache && docker compose up -d`.
 
-- Only download content you own or are authorized to download, and respect each platform's terms and applicable copyright law.
-- The bot does not bypass private access controls, DRM, or authentication restrictions.
-- Demucs is compute-intensive; first-time startup may download model weights and processing can take several minutes.
-- Vocal isolation is AI-based and may leave musical artifacts. It isolates the vocal stem; it cannot perfectly reconstruct every original voice.
-- Telegram upload/download limits depend on the Bot API and deployment configuration. Large files may fail.
-- Never commit `.env`, bot tokens, cookies, or other credentials.
+## الأمان والخصوصية
 
-## License
-
-Choose and add a license before distributing this project.
+لا يحتوي المشروع على رمز بوت. لا تنشر ملف `.env`. رابط التنزيل يُعالج على الجهاز الذي تستضيف عليه البوت؛ تُحذف ملفات العمل بعد المهمة، لكن سجلات المنصة أو مزود الاستضافة تخضع لإعداداته. يوجد فحص أولي لمنع الروابط المحلية/الخاصة، لكنه ليس بديلًا عن عزل الشبكة على خادم الإنتاج.
