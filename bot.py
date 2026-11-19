@@ -13,6 +13,12 @@ import tempfile
 from pathlib import Path
 from urllib.parse import urlparse
 
+# Limit native math-library thread pools on small containers.
+os.environ.setdefault("OMP_NUM_THREADS", "1")
+os.environ.setdefault("MKL_NUM_THREADS", "1")
+os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+
 import yt_dlp
 from dotenv import load_dotenv
 from telegram import InputFile, Update
@@ -25,13 +31,16 @@ logging.basicConfig(
     format="%(asctime)s %(levelname)s %(name)s: %(message)s",
 )
 log = logging.getLogger("media-cleaner")
+# httpx logs request URLs containing the Telegram bot token at INFO level.
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 MAX_DOWNLOAD_MB = int(os.getenv("MAX_DOWNLOAD_MB", "1000"))
 MAX_DURATION_MINUTES = int(os.getenv("MAX_DURATION_MINUTES", "90"))
 MAX_OUTPUT_MB = int(os.getenv("MAX_OUTPUT_MB", "48"))
-DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "htdemucs").strip()
-DEMUCS_SHIFTS = max(1, int(os.getenv("DEMUCS_SHIFTS", "2")))
+DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "mdx_q").strip()
+DEMUCS_SHIFTS = max(1, int(os.getenv("DEMUCS_SHIFTS", "1")))
+DEMUCS_SEGMENT_SECONDS = max(4, int(os.getenv("DEMUCS_SEGMENT_SECONDS", "8")))
 WORKERS = max(1, int(os.getenv("WORKERS", "1")))
 ALLOWED_USER_IDS = {
     int(part.strip()) for part in os.getenv("ALLOWED_USER_IDS", "").split(",")
@@ -54,9 +63,11 @@ def run_checked(args: list[str], *, timeout: int | None = None) -> subprocess.Co
     except FileNotFoundError as exc:
         raise UserFacingError(f"الأداة المطلوبة غير موجودة: {args[0]}. راجع إعداد Docker/README.") from exc
     except subprocess.CalledProcessError as exc:
-        detail = (exc.stderr or exc.stdout or "").strip()[-1200:]
-        log.warning("Command failed (%s): %s", args[0], detail)
-        raise UserFacingError("تعذرت معالجة هذا الملف. قد يكون الترميز غير مدعوم أو الملف تالفًا.") from exc
+        detail = (exc.stderr or exc.stdout or "").strip()[-3000:]
+        log.warning("Command failed (%s, exit=%s): %s", args[0], exc.returncode, detail)
+        if exc.returncode in (-9, 137):
+            raise UserFacingError("أوقفت الاستضافة المعالجة بسبب تجاوز الذاكرة المتاحة. جرّب مقطعًا أقصر.") from exc
+        raise UserFacingError("تعذرت معالجة هذا الملف. راجع سجل التشغيل لمعرفة السبب.") from exc
 
 
 def validate_public_url(url: str) -> str:
@@ -114,9 +125,10 @@ def download_media(url: str, workdir: Path) -> tuple[Path, str]:
         raise
     except Exception as exc:
         log.exception("yt-dlp failed")
-        raise UserFacingError(
-            "فشل تنزيل الرابط. تأكد أنه متاح علنًا وأن التنزيل مسموح به من المنصة؛ لا يدعم البوت تجاوز DRM أو تسجيل الدخول."
-        ) from exc
+        error_text = str(exc).lower()
+        if any(marker in error_text for marker in ("log in for access", "login required", "authentication", "cookies")):
+            raise UserFacingError("المنصة تطلب تسجيل الدخول أو تقيّد هذا الفيديو. جرّب رابطًا عامًا متاحًا دون حساب؛ البوت لا يتجاوز قيود الوصول أو DRM.") from exc
+        raise UserFacingError("فشل تنزيل الرابط. تأكد أن الرابط عام وأن المنصة تسمح بالتنزيل.") from exc
 
     if not info:
         raise UserFacingError("لم تُرجع المنصة بيانات صالحة عن الملف.")
@@ -167,14 +179,18 @@ def remove_background_music(source: Path, workdir: Path) -> tuple[Path, bool]:
     stems_dir = workdir / "stems"
     cmd = [
         "python", "-m", "demucs", "--two-stems=vocals", "-n", DEMUCS_MODEL,
-        "--shifts", str(DEMUCS_SHIFTS), "-o", str(stems_dir), str(input_wav),
+        "--shifts", str(DEMUCS_SHIFTS), "--segment", str(DEMUCS_SEGMENT_SECONDS),
+        "--overlap", "0.1", "-j", "1", "-d", "cpu",
+        "-o", str(stems_dir), str(input_wav),
     ]
     # Demucs can take a while on CPU; model weights are cached by the container/user.
     try:
         run_checked(cmd, timeout=max(3600, int((MAX_DURATION_MINUTES or 90) * 120)))
     except UserFacingError as exc:
+        if "الذاكرة" in str(exc):
+            raise
         raise UserFacingError(
-            "فشل فصل الصوت. تأكد من توفر الذاكرة والمساحة، ثم جرّب ملفًا أقصر. أول تشغيل قد يستغرق وقتًا لتنزيل نموذج Demucs."
+            "فشل فصل الصوت. راجع سجل التشغيل؛ جرّب مقطعًا أقصر إذا استمر الخطأ. أول تشغيل قد يستغرق وقتًا لتنزيل نموذج Demucs."
         ) from exc
 
     vocals = stems_dir / DEMUCS_MODEL / input_wav.stem / "vocals.wav"
