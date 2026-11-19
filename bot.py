@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import ipaddress
 import json
 import logging
@@ -22,6 +23,7 @@ os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
 import yt_dlp
 from dotenv import load_dotenv
 from telegram import InputFile, Update
+from telegram.error import Conflict
 from telegram.ext import Application, CommandHandler, ContextTypes, MessageHandler, filters
 
 load_dotenv()
@@ -36,11 +38,24 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "").strip()
 MAX_DOWNLOAD_MB = int(os.getenv("MAX_DOWNLOAD_MB", "1000"))
-MAX_DURATION_MINUTES = int(os.getenv("MAX_DURATION_MINUTES", "90"))
+MAX_DURATION_MINUTES = int(os.getenv("MAX_DURATION_MINUTES", "10"))
 MAX_OUTPUT_MB = int(os.getenv("MAX_OUTPUT_MB", "48"))
-DEMUCS_MODEL = os.getenv("DEMUCS_MODEL", "mdx_q").strip()
+
+
+def resolve_demucs_model(name: str) -> str:
+    """Quantized Demucs models (names containing `_q`) need DiffQ at runtime.
+
+    If DiffQ is not importable, fall back to htdemucs instead of failing every job.
+    """
+    if "_q" in name and importlib.util.find_spec("diffq") is None:
+        log.warning("DEMUCS_MODEL=%s needs DiffQ, which is not installed; using htdemucs.", name)
+        return "htdemucs"
+    return name
+
+
+DEMUCS_MODEL = resolve_demucs_model(os.getenv("DEMUCS_MODEL", "htdemucs").strip())
 DEMUCS_SHIFTS = max(1, int(os.getenv("DEMUCS_SHIFTS", "1")))
-DEMUCS_SEGMENT_SECONDS = max(4, int(os.getenv("DEMUCS_SEGMENT_SECONDS", "8")))
+DEMUCS_SEGMENT_SECONDS = min(7, max(4, int(os.getenv("DEMUCS_SEGMENT_SECONDS", "7"))))
 WORKERS = max(1, int(os.getenv("WORKERS", "1")))
 ALLOWED_USER_IDS = {
     int(part.strip()) for part in os.getenv("ALLOWED_USER_IDS", "").split(",")
@@ -64,7 +79,8 @@ def run_checked(args: list[str], *, timeout: int | None = None) -> subprocess.Co
         raise UserFacingError(f"الأداة المطلوبة غير موجودة: {args[0]}. راجع إعداد Docker/README.") from exc
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or exc.stdout or "").strip()[-3000:]
-        log.warning("Command failed (%s, exit=%s): %s", args[0], exc.returncode, detail)
+        # Full tool output goes to the logs so the real cause (e.g. a missing module) is visible.
+        log.error("Command failed (%s, exit=%s):\n%s", args[0], exc.returncode, detail or "<no output>")
         if exc.returncode in (-9, 137):
             raise UserFacingError("أوقفت الاستضافة المعالجة بسبب تجاوز الذاكرة المتاحة. جرّب مقطعًا أقصر.") from exc
         raise UserFacingError("تعذرت معالجة هذا الملف. راجع سجل التشغيل لمعرفة السبب.") from exc
@@ -308,6 +324,16 @@ async def post_init(application: Application) -> None:
     log.info("Bot started; workers=%s model=%s", WORKERS, DEMUCS_MODEL)
 
 
+async def on_error(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if isinstance(context.error, Conflict):
+        log.error(
+            "Telegram Conflict: another instance is polling with the same TELEGRAM_BOT_TOKEN. "
+            "Stop the other deployment/container (keep exactly one running)."
+        )
+        return
+    log.error("Unhandled error in handler", exc_info=context.error)
+
+
 def main() -> None:
     if not TOKEN:
         raise SystemExit("TELEGRAM_BOT_TOKEN is missing. Copy .env.example to .env and set the token.")
@@ -318,6 +344,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("help", help_command))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_url))
+    application.add_error_handler(on_error)
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=False)
 
 

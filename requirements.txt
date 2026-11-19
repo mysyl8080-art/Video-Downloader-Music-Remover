@@ -1,5 +1,4 @@
 python-telegram-bot>=21.0,<23.0
 yt-dlp>=2025.1.15
 demucs==4.0.1
-diffq>=0.2.1
 python-dotenv>=1.0.1
