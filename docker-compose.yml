@@ -1,0 +1,18 @@
+services:
+  bot:
+    build: .
+    container_name: telegram-media-cleaner
+    restart: unless-stopped
+    init: true
+    env_file:
+      - .env
+    environment:
+      TORCH_HOME: /home/botuser/.cache/torch
+      XDG_CACHE_HOME: /home/botuser/.cache
+    volumes:
+      - model-cache:/home/botuser/.cache
+    # Keep one worker unless the host has ample CPU/RAM and disk.
+    mem_limit: 8g
+
+volumes:
+  model-cache:
