@@ -5,17 +5,17 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     CUDA_VISIBLE_DEVICES=""
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      ffmpeg ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
-COPY requirements.txt ./
-# This worker runs inference on CPU; install CPU-only PyTorch to avoid
-# pulling hundreds of MB of unused CUDA/cuDNN/NCCL packages.
-RUN pip install --upgrade pip \
+
+# FFmpeg is required at runtime. gcc is needed only to compile DiffQ's
+# small native extension, which Demucs' quantized mdx_q model requires.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ffmpeg ca-certificates gcc \
+    && pip install --upgrade pip \
     && pip install --index-url https://download.pytorch.org/whl/cpu torch torchaudio \
-    && pip install -r requirements.txt
+    && pip install -r requirements.txt \
+    && apt-get purge -y --auto-remove gcc \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY bot.py ./
 RUN useradd --create-home --uid 10001 botuser \
